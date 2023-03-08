@@ -218,6 +218,7 @@ def main():
     model,es,model_checkpoint_callback = create_model()
     history = model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es , model_checkpoint_callback], verbose=2)
 
+    print("Training finished")
 
 if __name__ == "__main__":
     main()
