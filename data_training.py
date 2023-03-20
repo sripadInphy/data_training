@@ -17,6 +17,7 @@ from keras.models import Sequential
 from keras.layers import Dense, Dropout, Activation, Flatten, Conv1D, MaxPooling1D
 from keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
+from sklearn.preprocessing import LabelEncoder
 import csv
 import os
 import pickle as pkl
@@ -34,7 +35,7 @@ def create_model():
     with tf.device('/GPU:0'):
         CNN_Classifier = Sequential()
         #### FIRST LAYER ####
-        CNN_Classifier.add(Conv1D(64,(8), input_shape=(1500,1)))
+        CNN_Classifier.add(Conv1D(64,(8), input_shape=(3000,1)))
         CNN_Classifier.add(Activation("relu"))
         CNN_Classifier.add(MaxPooling1D(pool_size = (32)))
         CNN_Classifier.add(Dropout(0.2))
@@ -50,7 +51,7 @@ def create_model():
         # CNN_Classifier.add(Dense(64))
 
         #### OUTPUT LAYER ####
-        CNN_Classifier.add(Dense(14))
+        CNN_Classifier.add(Dense(18))
         CNN_Classifier.add(Activation('softmax'))
 
     es =  EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience = 10)
@@ -81,9 +82,10 @@ a column to label the spectrum.
 - From consolidated csv file split the data set to traininf and validation
 set.
 '''
-label_name = ['Cr51', 'Co57', 'F18', 'Co60', 'Xe133', 'I123', 'In111', 'I125',
-       'Sm153', 'Ir192', 'I131', 'Se75', 'Cs137', 'Ga67']
-label_number = [ 2  ,0  ,4  ,1 ,13  ,6  ,9  ,7 ,12 ,10  ,8 ,11 ,3 ,5]
+label_name = ['U238', 'Tc99m', 'Pu240', 'Cs137', 'Co60', 'K40', 'U233', 'Co57', 'Th232', 'Am241', 
+                'Pu239', 'I131', 'Ra226', 'Ga67', 'Ir192', 'Ba133', 'U235', 'Cf252']
+label_number = LabelEncoder().fit_transform(label_name)
+
 
 
 
@@ -111,6 +113,8 @@ def consolidated_data(folder_path, output_file):
 
 def consolidated_data_pkl(folder_path, output_file):
     count = 0
+    print("Labels : ", label_name)
+    print("Label Index : ", label_number)
     with open(output_file, 'w', newline='') as f_out:
         csv_writer = csv.writer(f_out)
 
@@ -179,12 +183,12 @@ def read_csv(filename):
                 glob_features = []
                 glob_labels = []
         # record = line.rstrip().split(',').astype(int)
-            features = [int(float(n)) for n in line[:1500]]
+            features = [int(float(n)) for n in line[:3000]]
             label = line[-1]
             features = np.array(features)
-            features = features.reshape(1500,-1)
+            features = features.reshape(3000,-1)
   
-            yield features, tf.keras.utils.to_categorical(int(label), num_classes=14)
+            yield features, tf.keras.utils.to_categorical(int(label), num_classes=18)
 
 
 
@@ -194,25 +198,25 @@ def main():
     folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data'
     output_file = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/output.csv'
     #Merge data
-    # consolidated_data_pkl(folder_path, output_file)
+    consolidated_data_pkl(folder_path, output_file)
     print("....Finished merging dataset......")
 
     #Split data
-    # split_dataset(output_file)
+    split_dataset(output_file)
     print("....Finished splitting dataset......")
 
     #Read training dataset
-    tf_ds = lambda: read_csv('C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/train_select.csv')
+    tf_ds = lambda: read_csv('C:/theCave/ISO-ID/train/train_select.csv')
 
     #Create Dataset using dataset generator 
-    dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(1500,1), dtype=tf.uint16),tf.TensorSpec(shape=([14]), dtype=tf.uint8)))
+    dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(3000,1), dtype=tf.uint16),tf.TensorSpec(shape=([18]), dtype=tf.uint8)))
 
     dataset = dataset.shuffle(1000)
     dataset = dataset.batch(256).prefetch(3)
 
     #Read Validation dataset
-    val_ds = lambda: read_csv('C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/validation_select.csv')
-    val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([1500,1]),tf.TensorShape([14])))
+    val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
+    val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([3000,1]),tf.TensorShape([18])))
 
     val_ds = val_ds.batch(256).prefetch(3)
     model,es,model_checkpoint_callback = create_model()
