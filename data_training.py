@@ -18,6 +18,10 @@ from keras.layers import Dense, Dropout, Activation, Flatten, Conv1D, MaxPooling
 from keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
 from sklearn.preprocessing import LabelEncoder
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+from joblib import dump
 import csv
 import os
 import pickle as pkl
@@ -30,29 +34,31 @@ import random
 Model Creation
 '''
 
-def create_model():
+def create_cnn():
 
     with tf.device('/GPU:0'):
         CNN_Classifier = Sequential()
         #### FIRST LAYER ####
-        CNN_Classifier.add(Conv1D(64,(8), input_shape=(3000,1)))
+        CNN_Classifier.add(Conv1D(64,(5), input_shape=(3000,1)))
         CNN_Classifier.add(Activation("relu"))
-        CNN_Classifier.add(MaxPooling1D(pool_size = (32)))
-        CNN_Classifier.add(Dropout(0.2))
+        CNN_Classifier.add(MaxPooling1D(pool_size = (2)))
+        CNN_Classifier.add(Flatten())
 
         #### SECOND LAYER ####
-        CNN_Classifier.add(Conv1D(128,(4)))
+        CNN_Classifier.add(Dense(64))
         CNN_Classifier.add(Activation("relu"))
-        CNN_Classifier.add(MaxPooling1D(pool_size = (16)))
-        CNN_Classifier.add(Dropout(0.2))
+        CNN_Classifier.add(Dropout(0.5))
         
-        #### FINAL LAYER ####
-        CNN_Classifier.add(Flatten())
-        # CNN_Classifier.add(Dense(64))
+        #### THIRD LAYER ####
+        CNN_Classifier.add(Dense(32))
+        CNN_Classifier.add(Activation("relu"))
+        CNN_Classifier.add(Dropout(0.5))
+        
+
 
         #### OUTPUT LAYER ####
         CNN_Classifier.add(Dense(18))
-        CNN_Classifier.add(Activation('softmax'))
+        CNN_Classifier.add(Activation('sigmoid'))
 
     es =  EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience = 10)
     fname = os.path.sep.join(['C:/theCave/ISO-ID/data_prep/weights/',
@@ -72,6 +78,8 @@ def create_model():
         CNN_Classifier.compile(optimizer = tf.keras.optimizers.legacy.Adam(learning_rate = 1e-5, decay = 1e-6),loss = 'categorical_crossentropy', metrics = ['categorical_accuracy', 'accuracy', 'mse'])
     
     return CNN_Classifier,es,model_checkpoint_callback
+
+
 
 '''
 Data Processing.
@@ -191,6 +199,19 @@ def read_csv(filename):
             yield features, tf.keras.utils.to_categorical(int(label), num_classes=18)
 
 
+def generate_predictions(model, generator):
+    X = []
+    y = []
+    for batch in generator:
+        features, label = batch
+        X.append(features)
+        y.append(label)
+    X = np.concatenate(X)
+    y = np.concatenate(y)
+    predictions = model.predict(X)
+    return predictions, y
+
+
 
 def main():
 
@@ -198,11 +219,11 @@ def main():
     folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data'
     output_file = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/output.csv'
     #Merge data
-    consolidated_data_pkl(folder_path, output_file)
+    # consolidated_data_pkl(folder_path, output_file)
     print("....Finished merging dataset......")
 
     #Split data
-    split_dataset(output_file)
+    # split_dataset(output_file)
     print("....Finished splitting dataset......")
 
     #Read training dataset
@@ -219,8 +240,53 @@ def main():
     val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([3000,1]),tf.TensorShape([18])))
 
     val_ds = val_ds.batch(256).prefetch(3)
-    model,es,model_checkpoint_callback = create_model()
-    history = model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es , model_checkpoint_callback], verbose=2)
+    cnn_model,es,model_checkpoint_callback = create_cnn()
+    history = cnn_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es , model_checkpoint_callback], verbose=2)
+
+    dump(cnn_model, 'C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
+
+    #Extract features using CNN Model
+    cnn_predictions, cnn_labels = generate_predictions(cnn_model, dataset)
+
+    # Flatten the features for SVM and Random Forest
+    cnn_predictions = cnn_predictions.reshape(len(cnn_predictions), -1)
+
+    #Train SVM model 
+    svm = SVC(kernel='rbf', C=1.0, gamma='scale')
+    svm.fit(cnn_predictions, cnn_labels)
+
+    dump(svm, 'C:/theCave/ISO-ID/train/trained_models/cnn_svm.joblib')
+
+    print("******* SVM trained **************")
+
+    #Train Random  Forest model
+    rf = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+    rf.fit(cnn_predictions, cnn_labels)
+    dump(rf, 'C:/theCave/ISO-ID/train/trained_models/cnn_rf.joblib')
+
+    print("******* Random Forest Done trained **************")
+
+
+    print("*********Model Evaluation****************")
+
+    val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
+    svm_pred,svm_labels = generate_predictions(svm,val_ds)
+    val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
+    rf_pred,rf_labels = generate_predictions(rf,val_ds)
+
+    print("SVM Confusion Matrix:")
+    print(confusion_matrix(svm_labels, svm_pred))
+    print("SVM Classification Report:")
+    print(classification_report(svm_labels, svm_pred))
+
+
+
+    print("Random Forest Confusion Matrix:")
+    print(confusion_matrix(rf_labels, rf_pred))
+    print("SVM Classification Report:")
+    print(classification_report(rf_labels, rf_pred))
+
+
 
     print("Training finished")
 
