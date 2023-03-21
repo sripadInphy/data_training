@@ -21,7 +21,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
-from joblib import dump
+from joblib import dump,load
 import csv
 import os
 import pickle as pkl
@@ -239,10 +239,10 @@ def main():
     val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
     val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([3000,1]),tf.TensorShape([18])))
 
-    val_ds = val_ds.batch(256).prefetch(3)
+    val_ds = val_ds.batch(256).prefetch(3).repeat()
     cnn_model,es,model_checkpoint_callback = create_cnn()
     history = cnn_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es , model_checkpoint_callback], verbose=2)
-
+    
     dump(cnn_model, 'C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
 
     #Extract features using CNN Model
@@ -250,7 +250,8 @@ def main():
 
     # Flatten the features for SVM and Random Forest
     cnn_predictions = cnn_predictions.reshape(len(cnn_predictions), -1)
-
+    # Make Labels a 1-D array 
+    cnn_labels = np.argmax(cnn_labels, axis=1)
     #Train SVM model 
     svm = SVC(kernel='rbf', C=1.0, gamma='scale')
     svm.fit(cnn_predictions, cnn_labels)
@@ -265,29 +266,6 @@ def main():
     dump(rf, 'C:/theCave/ISO-ID/train/trained_models/cnn_rf.joblib')
 
     print("******* Random Forest Done trained **************")
-
-
-    print("*********Model Evaluation****************")
-
-    val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
-    svm_pred,svm_labels = generate_predictions(svm,val_ds)
-    val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
-    rf_pred,rf_labels = generate_predictions(rf,val_ds)
-
-    print("SVM Confusion Matrix:")
-    print(confusion_matrix(svm_labels, svm_pred))
-    print("SVM Classification Report:")
-    print(classification_report(svm_labels, svm_pred))
-
-
-
-    print("Random Forest Confusion Matrix:")
-    print(confusion_matrix(rf_labels, rf_pred))
-    print("SVM Classification Report:")
-    print(classification_report(rf_labels, rf_pred))
-
-
-
     print("Training finished")
 
 if __name__ == "__main__":
