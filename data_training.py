@@ -17,7 +17,7 @@ from keras.models import Sequential
 from keras.layers import Dense, Dropout, Activation, Flatten, Conv1D, MaxPooling1D
 from keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
@@ -26,6 +26,7 @@ import csv
 import os
 import pickle as pkl
 import random
+import datetime
 
 
 
@@ -39,7 +40,7 @@ def create_cnn():
     with tf.device('/GPU:0'):
         CNN_Classifier = Sequential()
         #### FIRST LAYER ####
-        CNN_Classifier.add(Conv1D(64,(5), input_shape=(3000,1)))
+        CNN_Classifier.add(Conv1D(32,(3), input_shape=(3000,1)))
         CNN_Classifier.add(Activation("relu"))
         CNN_Classifier.add(MaxPooling1D(pool_size = (2)))
         CNN_Classifier.add(Flatten())
@@ -47,12 +48,12 @@ def create_cnn():
         #### SECOND LAYER ####
         CNN_Classifier.add(Dense(64))
         CNN_Classifier.add(Activation("relu"))
-        CNN_Classifier.add(Dropout(0.5))
+        CNN_Classifier.add(Dropout(0.2))
         
         #### THIRD LAYER ####
         CNN_Classifier.add(Dense(32))
         CNN_Classifier.add(Activation("relu"))
-        CNN_Classifier.add(Dropout(0.5))
+        CNN_Classifier.add(Dropout(0.2))
         
 
 
@@ -65,6 +66,8 @@ def create_cnn():
         "weights-{epoch:03d}-{val_loss:.4f}.hdf5"])
 
 
+    log_dir = "C:/theCave/ISO-ID/train/logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         fname,
         save_weights_only=True,
@@ -77,7 +80,41 @@ def create_cnn():
     with tf.device('/GPU:0'):
         CNN_Classifier.compile(optimizer = tf.keras.optimizers.legacy.Adam(learning_rate = 1e-5, decay = 1e-6),loss = 'categorical_crossentropy', metrics = ['categorical_accuracy', 'accuracy', 'mse'])
     
-    return CNN_Classifier,es,model_checkpoint_callback
+    return CNN_Classifier,es,model_checkpoint_callback,tensorboard_callback
+
+
+
+'''
+Model History 
+evaluate the model
+'''
+
+def plot_model_history(model_name, history, epochs):
+  
+  print(model_name)
+  plt.figure(figsize=(15, 5))
+  
+  # summarize history for accuracy
+  plt.subplot(1, 2 ,1)
+  plt.plot(np.arange(0, len(history['accuracy'])), history['accuracy'], 'r')
+  plt.plot(np.arange(1, len(history['val_accuracy'])+1), history['val_accuracy'], 'g')
+  plt.xticks(np.arange(0, epochs+1, epochs/10))
+  plt.title('Training Accuracy vs. Validation Accuracy')
+  plt.xlabel('Num of Epochs')
+  plt.ylabel('Accuracy')
+  plt.legend(['train', 'validation'], loc='best')
+  
+  plt.subplot(1, 2, 2)
+  plt.plot(np.arange(1, len(history['loss'])+1), history['loss'], 'r')
+  plt.plot(np.arange(1, len(history['val_loss'])+1), history['val_loss'], 'g')
+  plt.xticks(np.arange(0, epochs+1, epochs/10))
+  plt.title('Training Loss vs. Validation Loss')
+  plt.xlabel('Num of Epochs')
+  plt.ylabel('Loss')
+  plt.legend(['train', 'validation'], loc='best')
+  
+  
+  plt.show()
 
 
 
@@ -92,6 +129,8 @@ set.
 '''
 label_name = ['U238', 'Tc99m', 'Pu240', 'Cs137', 'Co60', 'K40', 'U233', 'Co57', 'Th232', 'Am241', 
                 'Pu239', 'I131', 'Ra226', 'Ga67', 'Ir192', 'Ba133', 'U235', 'Cf252']
+
+# label_name = ['Co57', 'Co60', 'Cr51', 'Cs137', 'F18', 'Ga67', 'I123', 'I125', 'I131', 'In111', 'Ir192', 'Se75', 'Sm153', 'Xe133']
 label_number = LabelEncoder().fit_transform(label_name)
 
 
@@ -120,19 +159,36 @@ def consolidated_data(folder_path, output_file):
 #Function to create consolidated dataset for pickle files
 
 def consolidated_data_pkl(folder_path, output_file):
-    count = 0
-    print("Labels : ", label_name)
-    print("Label Index : ", label_number)
     with open(output_file, 'w', newline='') as f_out:
         csv_writer = csv.writer(f_out)
 
         for filename in os.listdir(folder_path):
             if filename.endswith(".pkl") and filename != output_file:
-                with open(os.path.join(folder_path, filename), 'rb') as f_in:
-                    data = pkl.load(f_in)
-                    name_col = np.full((data.shape[0],1),label_number[label_name.index(filename.split('.')[0])])
-                    data_with_name = np.concatenate((data,name_col),axis=1)
-                    csv_writer.writerows(data_with_name)
+                data = np.load(os.path.join(folder_path, filename),allow_pickle=True)
+                spectrum = np.zeros((len(data), 3001), dtype = object)
+                for i, row in enumerate(data):
+                    spectrum[i,:-1] = row[0]
+                    # spectrum[i,-1] = np.array([row[1]])
+                    spectrum[i,-1] = row[1]
+                df = pd.DataFrame(spectrum)
+                df.to_csv(f_out, index=False, header=False)   
+            print("Finished adding ", filename)
+
+
+# def consolidated_data_pkl(folder_path, output_file):
+#     count = 0
+#     print("Labels : ", label_name)
+#     print("Label Index : ", label_number)
+#     with open(output_file, 'w', newline='') as f_out:
+#         csv_writer = csv.writer(f_out)
+
+#         for filename in os.listdir(folder_path):
+#             if filename.endswith(".pkl") and filename != output_file:
+#                 with open(os.path.join(folder_path, filename), 'rb') as f_in:
+#                     data = pkl.load(f_in)
+#                     name_col = np.full((data.shape[0],1),label_number[label_name.index(filename.split('.')[0])])
+#                     data_with_name = np.concatenate((data,name_col),axis=1)
+#                     csv_writer.writerows(data_with_name)
 
 
 
@@ -178,24 +234,34 @@ Data training :
 '''
 
 #Function to read large csv file. To be used to model's generator function for training.
+# def read_csv(filename):
+#     with open(filename, 'r') as f:
+#         reader = csv.reader(f)
+
+#         for line in reader:
+#             features = [int(float(n)) for n in line[:1500]]
+#             labels = line[-1]
+#             labels = [int(float(n)) for n in labels if n not in ['[', ']']]
+#             features = np.array(features)
+#             features = features.reshape(1500,-1)
+#             mlb = MultiLabelBinarizer(classes=list(range(14)))
+#             label_list = mlb.fit_transform([labels])
+#             label = label_list[0]
+#             yield features,label
+
+
+
 def read_csv(filename):
     with open(filename, 'r') as f:
         reader = csv.reader(f)
         count = 0
 
-        glob_labels  = []
-        glob_features = []
         for line in reader:
-            # print('line : ' ,line)
-            if count == 1 : 
-                glob_features = []
-                glob_labels = []
-        # record = line.rstrip().split(',').astype(int)
-            features = [int(float(n)) for n in line[:3000]]
+            features = [np.float64(n) for n in line[:3000]]
             label = line[-1]
             features = np.array(features)
             features = features.reshape(3000,-1)
-  
+            features = features*1000  #scale it up cuz the model can't recognize small values
             yield features, tf.keras.utils.to_categorical(int(label), num_classes=18)
 
 
@@ -216,34 +282,53 @@ def generate_predictions(model, generator):
 def main():
 
 
-    folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data'
-    output_file = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/output.csv'
+
+    # folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data'
+    # output_file = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/output.csv'
+    folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/output_13_apr_shielding_100_reps_10bins0'
+    output_file = 'C:/theCave/ISO-ID/data_prep/output_data/output_13_apr_shielding_100_reps_10bins0/output.csv'
+
+    
     #Merge data
-    # consolidated_data_pkl(folder_path, output_file)
+    consolidated_data_pkl(folder_path, output_file)
     print("....Finished merging dataset......")
 
     #Split data
-    # split_dataset(output_file)
+    split_dataset(output_file)
     print("....Finished splitting dataset......")
 
     #Read training dataset
     tf_ds = lambda: read_csv('C:/theCave/ISO-ID/train/train_select.csv')
 
     #Create Dataset using dataset generator 
-    dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(3000,1), dtype=tf.uint16),tf.TensorSpec(shape=([18]), dtype=tf.uint8)))
+    # dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(1500,1), dtype=tf.uint16),tf.TensorSpec(shape=([14]), dtype=tf.uint8)))
+    dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(3000,1), dtype=tf.dtypes.float64), tf.TensorSpec(shape=([18]))))
+
 
     dataset = dataset.shuffle(1000)
     dataset = dataset.batch(256).prefetch(3)
 
     #Read Validation dataset
     val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
-    val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([3000,1]),tf.TensorShape([18])))
+    # val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([1500,1]),tf.TensorShape([14])))
+    val_ds = tf.data.Dataset.from_generator(val_ds, output_signature=(tf.TensorSpec(shape=(3000,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=([18]))))
 
-    val_ds = val_ds.batch(256).prefetch(3).repeat()
-    cnn_model,es,model_checkpoint_callback = create_cnn()
-    history = cnn_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es , model_checkpoint_callback], verbose=2)
+
+    val_ds = val_ds.batch(256).prefetch(3)
+    cnn_model,es,model_checkpoint_callback,tboard = create_cnn()
+    history = cnn_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es, model_checkpoint_callback,tboard], verbose=2)        #Early stopping removed
     
     dump(cnn_model, 'C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
+
+    plot_model_history('CNN', history.history,100)
+
+    #Retraining with new Data 
+
+    if False: 
+        model = load('C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
+
+
+
 
     #Extract features using CNN Model
     cnn_predictions, cnn_labels = generate_predictions(cnn_model, dataset)
@@ -261,9 +346,9 @@ def main():
     print("******* SVM trained **************")
 
     #Train Random  Forest model
-    rf = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
-    rf.fit(cnn_predictions, cnn_labels)
-    dump(rf, 'C:/theCave/ISO-ID/train/trained_models/cnn_rf.joblib')
+    # rf = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+    # rf.fit(cnn_predictions, cnn_labels)
+    # dump(rf, 'C:/theCave/ISO-ID/train/trained_models/cnn_rf.joblib')
 
     print("******* Random Forest Done trained **************")
     print("Training finished")

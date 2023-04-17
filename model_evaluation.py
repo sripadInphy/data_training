@@ -13,6 +13,7 @@ np_config.enable_numpy_behavior()
 
 label_name = ['U', 'Tc', 'Pu', 'Cs', 'Co', 'K', 'U', 'Co57', 'Th', 'Am', 
                     'Pu239', 'I', 'Ra', 'Ga', 'Ir', 'Ba', 'U235', 'Cf252']
+# label_name = ['Co57', 'Co60', 'Cr51', 'Cs137', 'F18', 'Ga67', 'I123', 'I125', 'I131', 'In111', 'Ir192', 'Se75', 'Sm153', 'Xe133']
 label_number = LabelEncoder().fit_transform(label_name).tolist()
 
 def generate_predictions(cnn_model, generator, sec_model=None):
@@ -53,17 +54,17 @@ def read_csv(filename):
                 glob_features = []
                 glob_labels = []
         # record = line.rstrip().split(',').astype(int)
-            features = [int(float(n)) for n in line[:3000]]
+            features = [np.float64(n) for n in line[:3000]]
             label = line[-1]
             features = np.array(features)
             features = features.reshape(3000,-1)
-  
+            features = features*1000
             yield features, tf.keras.utils.to_categorical(int(label), num_classes=18)
 
 
 
 def plot_confusion_matrix(matrix, title):
-    labels = [i for i in range(18)]
+    labels = [i for i in range(14)]
     fig, ax = plt.subplots(figsize=(10, 8))
     sns.heatmap(matrix, annot=True, cmap='Blues', fmt='d', xticklabels=labels, yticklabels=labels, ax=ax)
     ax.set_xlabel('Predicted label')
@@ -79,15 +80,16 @@ def main():
     print("*********Model Evaluation****************")
     model = load('C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
     svm_model = load('C:/theCave/ISO-ID/train/trained_models/cnn_svm.joblib')
-    rnd_model = load('C:/theCave/ISO-ID/train/trained_models/cnn_rf.joblib')
+    # rnd_model = load('C:/theCave/ISO-ID/train/trained_models/cnn_rf.joblib')
     val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
-    val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([3000,1]),tf.TensorShape([18])))
+    # val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([3000,1]),tf.TensorShape([18])))
+    val_ds = tf.data.Dataset.from_generator(val_ds, output_signature=(tf.TensorSpec(shape=(3000,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=([18]))))
     val_ds = val_ds.batch(256).prefetch(3)
    
 
 
-    models = [None, rnd_model, svm_model]
-    model_names = ['CNN', 'Random Forest', 'SVM']
+    models = [None, svm_model]
+    model_names = ['CNN', 'SVM']
     results = []
     confusion_matrices = []
 
@@ -128,7 +130,7 @@ def main():
     # ax.xaxis.tick_top()
     # ax.set_xlabel('Predicted Label')
     # ax.set_ylabel('True Label')
-    # plt.show()
+    plt.show()
 
 
 
