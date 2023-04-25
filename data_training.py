@@ -27,9 +27,17 @@ import os
 import pickle as pkl
 import random
 import datetime
+import glob
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.linear_model import LogisticRegression
 
 
 
+
+
+no_of_bins = 1500
+no_of_class = 8
 
 '''
 Model Creation
@@ -40,7 +48,7 @@ def create_cnn():
     with tf.device('/GPU:0'):
         CNN_Classifier = Sequential()
         #### FIRST LAYER ####
-        CNN_Classifier.add(Conv1D(32,(3), input_shape=(3000,1)))
+        CNN_Classifier.add(Conv1D(32,(3), input_shape=(no_of_bins,1)))
         CNN_Classifier.add(Activation("relu"))
         CNN_Classifier.add(MaxPooling1D(pool_size = (2)))
         CNN_Classifier.add(Flatten())
@@ -58,7 +66,7 @@ def create_cnn():
 
 
         #### OUTPUT LAYER ####
-        CNN_Classifier.add(Dense(18))
+        CNN_Classifier.add(Dense(no_of_class))
         CNN_Classifier.add(Activation('sigmoid'))
 
     es =  EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience = 10)
@@ -127,12 +135,27 @@ a column to label the spectrum.
 - From consolidated csv file split the data set to traininf and validation
 set.
 '''
-label_name = ['U238', 'Tc99m', 'Pu240', 'Cs137', 'Co60', 'K40', 'U233', 'Co57', 'Th232', 'Am241', 
-                'Pu239', 'I131', 'Ra226', 'Ga67', 'Ir192', 'Ba133', 'U235', 'Cf252']
+# label_name = ['U238', 'Tc99m', 'Pu240', 'Cs137', 'Co60', 'K40', 'U233', 'Co57', 'Th232', 'Am241', 
+#                 'Pu239', 'I131', 'Ra226', 'Ga67', 'Ir192', 'Ba133', 'U235', 'Cf252']
 
+label_name = ['Cs137','Co60','K40','Co57','Am241','I131','Ir192','Ba133']
 # label_name = ['Co57', 'Co60', 'Cr51', 'Cs137', 'F18', 'Ga67', 'I123', 'I125', 'I131', 'In111', 'Ir192', 'Se75', 'Sm153', 'Xe133']
 label_number = LabelEncoder().fit_transform(label_name)
 
+
+def normalize(arr):
+    """
+    Normalizes an array by dividing each element by the sum of all elements.
+
+    Args:
+        arr (list): A list of numbers to normalize.
+
+    Returns:
+        list: A normalized list of numbers.
+    """
+    arr = [float(x) for x in arr]
+    arr_sum = sum(arr)
+    return [float(i) / arr_sum for i in arr]
 
 
 
@@ -141,19 +164,25 @@ label_number = LabelEncoder().fit_transform(label_name)
 def consolidated_data(folder_path, output_file):
     # create the header for the output file
     header_written = False
-    count = 1
+    count = 0
+    folders = os.listdir(folder_path)
     with open(output_file, 'w', newline='') as f_out:
         csv_writer = csv.writer(f_out)
-
-        for filename in os.listdir(folder_path):
-            if filename.endswith(".csv") and filename != output_file:
-                with open(os.path.join(folder_path, filename), 'r') as f_in:
+        for filename in folders:
+                with open(os.path.join(folder_path, filename), 'r') as f_in: 
+                    print(filename)
                     csv_reader = csv.reader(f_in)
                     for row in csv_reader:
-                        label = filename.split()[0]
-                        row.append(label)
-                        csv_writer.writerow(row)
-                        count = count + 1
+                        if len(row) > 0:
+                            label = filename.split('.')[0]
+                            row = normalize(row)
+                            row = [float(val)*10000 for val in row]
+                            row.append(label_number[label_name.index(label)])
+                            csv_writer.writerow(row)
+                            count = count + 1
+                    
+
+
 
 
 #Function to create consolidated dataset for pickle files
@@ -171,7 +200,7 @@ def consolidated_data_pkl(folder_path, output_file):
                     # spectrum[i,-1] = np.array([row[1]])
                     spectrum[i,-1] = row[1]
                 df = pd.DataFrame(spectrum)
-                df.to_csv(f_out, index=False, header=False)   
+                # df.to_csv(f_out, index=False, header=False)   
             print("Finished adding ", filename)
 
 
@@ -257,12 +286,12 @@ def read_csv(filename):
         count = 0
 
         for line in reader:
-            features = [np.float64(n) for n in line[:3000]]
+            features = [np.float64(n) for n in line[:no_of_bins]]
             label = line[-1]
             features = np.array(features)
-            features = features.reshape(3000,-1)
-            features = features*1000  #scale it up cuz the model can't recognize small values
-            yield features, tf.keras.utils.to_categorical(int(label), num_classes=18)
+            features = features.reshape(no_of_bins,-1)
+            # features = features*1000  #scale it up cuz the model can't recognize small values
+            yield features, tf.keras.utils.to_categorical(int(label), num_classes=no_of_class)
 
 
 def generate_predictions(model, generator):
@@ -282,75 +311,103 @@ def generate_predictions(model, generator):
 def main():
 
 
+    if True:
+        # folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data'
+        # output_file = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/output.csv'
+        folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/smooth_small_dataset_david'
+        output_file = 'C:/theCave/ISO-ID/data_prep/output_data/smooth_small_dataset_david/output.csv'
 
-    # folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data'
-    # output_file = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/output.csv'
-    folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/output_13_apr_shielding_100_reps_10bins0'
-    output_file = 'C:/theCave/ISO-ID/data_prep/output_data/output_13_apr_shielding_100_reps_10bins0/output.csv'
+        
+        #Merge data
+        # consolidated_data_pkl(folder_path, output_file)
+        consolidated_data(folder_path, output_file)
+        print("....Finished merging dataset......")
 
-    
-    #Merge data
-    consolidated_data_pkl(folder_path, output_file)
-    print("....Finished merging dataset......")
+        #Split data
+        split_dataset(output_file)
+        print("....Finished splitting dataset......")
 
-    #Split data
-    split_dataset(output_file)
-    print("....Finished splitting dataset......")
+        # #Read training dataset
+        tf_ds = lambda: read_csv('C:/theCave/ISO-ID/train/train_select.csv')
 
-    #Read training dataset
-    tf_ds = lambda: read_csv('C:/theCave/ISO-ID/train/train_select.csv')
-
-    #Create Dataset using dataset generator 
-    # dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(1500,1), dtype=tf.uint16),tf.TensorSpec(shape=([14]), dtype=tf.uint8)))
-    dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(3000,1), dtype=tf.dtypes.float64), tf.TensorSpec(shape=([18]))))
-
-
-    dataset = dataset.shuffle(1000)
-    dataset = dataset.batch(256).prefetch(3)
-
-    #Read Validation dataset
-    val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
-    # val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([1500,1]),tf.TensorShape([14])))
-    val_ds = tf.data.Dataset.from_generator(val_ds, output_signature=(tf.TensorSpec(shape=(3000,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=([18]))))
+        #Create Dataset using dataset generator 
+        # dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(1500,1), dtype=tf.uint16),tf.TensorSpec(shape=([14]), dtype=tf.uint8)))
+        dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(no_of_bins,1), dtype=tf.dtypes.float64), tf.TensorSpec(shape=([no_of_class]))))
 
 
-    val_ds = val_ds.batch(256).prefetch(3)
-    cnn_model,es,model_checkpoint_callback,tboard = create_cnn()
-    history = cnn_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es, model_checkpoint_callback,tboard], verbose=2)        #Early stopping removed
-    
-    dump(cnn_model, 'C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
+        dataset = dataset.shuffle(1000)
+        dataset = dataset.batch(256).prefetch(3)
 
-    plot_model_history('CNN', history.history,100)
+        #Read Validation dataset
+        val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
+        # val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([1500,1]),tf.TensorShape([14])))
+        val_ds = tf.data.Dataset.from_generator(val_ds, output_signature=(tf.TensorSpec(shape=(no_of_bins,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=([no_of_class]))))
 
-    #Retraining with new Data 
 
-    if False: 
-        model = load('C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
+        val_ds = val_ds.batch(256).prefetch(3)
+        cnn_model,es,model_checkpoint_callback,tboard = create_cnn()
+        history = cnn_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es, model_checkpoint_callback,tboard], verbose=2)        #Early stopping removed
+        
+        dump(cnn_model, 'C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
+
+        plot_model_history('CNN', history.history,100)
 
 
 
 
-    #Extract features using CNN Model
-    cnn_predictions, cnn_labels = generate_predictions(cnn_model, dataset)
 
-    # Flatten the features for SVM and Random Forest
-    cnn_predictions = cnn_predictions.reshape(len(cnn_predictions), -1)
-    # Make Labels a 1-D array 
-    cnn_labels = np.argmax(cnn_labels, axis=1)
-    #Train SVM model 
-    svm = SVC(kernel='rbf', C=1.0, gamma='scale')
-    svm.fit(cnn_predictions, cnn_labels)
+        #Extract features using CNN Model
+        cnn_predictions, cnn_labels = generate_predictions(cnn_model, dataset)
 
-    dump(svm, 'C:/theCave/ISO-ID/train/trained_models/cnn_svm.joblib')
+        # Flatten the features for SVM and Random Forest
+        cnn_predictions = cnn_predictions.reshape(len(cnn_predictions), -1)
+        # Make Labels a 1-D array 
+        cnn_labels = np.argmax(cnn_labels, axis=1)
+        #Train SVM model 
+        svm = SVC(kernel='rbf', C=1.0, gamma='scale')
+        svm.fit(cnn_predictions, cnn_labels)
 
-    print("******* SVM trained **************")
+        dump(svm, 'C:/theCave/ISO-ID/train/trained_models/cnn_svm.joblib')
 
-    #Train Random  Forest model
-    # rf = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
-    # rf.fit(cnn_predictions, cnn_labels)
-    # dump(rf, 'C:/theCave/ISO-ID/train/trained_models/cnn_rf.joblib')
+    '''
+    Other classifiers 
+    '''
+    if False:
+        # initialize the classifiers
+        knn = KNeighborsClassifier(n_neighbors=50)
+        nb = GaussianNB()
+        lr = LogisticRegression()
+        svm_clf = SVC(kernel='linear')
 
-    print("******* Random Forest Done trained **************")
+
+        train_dataset = list(read_csv('C:/theCave/ISO-ID/train/train_select.csv'))
+        train_features = np.array([x[0].reshape(no_of_bins,) for x in train_dataset])
+        train_labels = np.array([x[1] for x in train_dataset])
+
+        knn.fit(train_features, np.argmax(train_labels, axis=1))
+        dump(knn, 'C:/theCave/ISO-ID/train/trained_models/knn.joblib')
+        nb.fit(train_features, np.argmax(train_labels, axis=1))
+        dump(nb, 'C:/theCave/ISO-ID/train/trained_models/nb.joblib')
+        lr.fit(train_features, np.argmax(train_labels, axis=1))
+        dump(lr, 'C:/theCave/ISO-ID/train/trained_models/lr.joblib')
+        svm_clf.fit(train_features, np.argmax(train_labels, axis=1))
+        dump(svm_clf, 'C:/theCave/ISO-ID/train/trained_models/svm.joblib')
+
+        val_dataset = list(read_csv('C:/theCave/ISO-ID/train/validation_select.csv'))
+        val_features = np.array([x[0].reshape(no_of_bins,) for x in val_dataset])
+        val_labels = np.array([x[1] for x in val_dataset])
+
+        knn_score = knn.score(val_features, np.argmax(val_labels, axis=1))
+        nb_score = nb.score(val_features, np.argmax(val_labels, axis=1))
+        lr_score = lr.score(val_features, np.argmax(val_labels, axis=1))
+        svm_score = svm_clf.score(val_features, np.argmax(val_labels, axis=1))
+
+        print("KNN score: ", knn_score)
+        print("Naive Bayes score: ", nb_score)
+        print("Logistic Regression score: ", lr_score)
+        print("SVM score: ", svm_score)
+
+
     print("Training finished")
 
 if __name__ == "__main__":
