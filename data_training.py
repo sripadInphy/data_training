@@ -22,12 +22,15 @@ from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
 from joblib import dump,load
+import keras.backend as K
 import csv
 import os
 import pickle as pkl
 import random
 import datetime
 import glob
+import re
+import ast
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.linear_model import LogisticRegression
@@ -37,12 +40,13 @@ from sklearn.linear_model import LogisticRegression
 
 
 no_of_bins = 1500
-no_of_class = 8
+no_of_class = 9
+pos_weight = 1
+neg_weight = 1
 
 '''
 Model Creation
 '''
-
 def create_cnn():
 
     with tf.device('/GPU:0'):
@@ -63,13 +67,10 @@ def create_cnn():
         CNN_Classifier.add(Activation("relu"))
         CNN_Classifier.add(Dropout(0.2))
         
-
-
         #### OUTPUT LAYER ####
-        CNN_Classifier.add(Dense(no_of_class))
-        CNN_Classifier.add(Activation('sigmoid'))
-
-    es =  EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience = 10)
+        CNN_Classifier.add(Dense(no_of_class, activation='sigmoid'))
+        
+    es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience = 10)
     fname = os.path.sep.join(['C:/theCave/ISO-ID/data_prep/weights/',
         "weights-{epoch:03d}-{val_loss:.4f}.hdf5"])
 
@@ -84,12 +85,24 @@ def create_cnn():
         save_best_only=True,
         verbose=1)
 
-
     with tf.device('/GPU:0'):
-        CNN_Classifier.compile(optimizer = tf.keras.optimizers.legacy.Adam(learning_rate = 1e-5, decay = 1e-6),loss = 'categorical_crossentropy', metrics = ['categorical_accuracy', 'accuracy', 'mse'])
-    
-    return CNN_Classifier,es,model_checkpoint_callback,tensorboard_callback
+        # Define the weighted binary cross-entropy loss function
+        def weighted_binary_crossentropy(y_true, y_pred):
+            # Get the binary cross-entropy loss
+            bce = K.binary_crossentropy(y_true, y_pred)
 
+            # Apply the sample weights
+            weight_vector = y_true * pos_weight + (1. - y_true) * neg_weight
+            weighted_bce = weight_vector * bce
+
+            # Return the mean over all samples
+            return K.mean(weighted_bce)
+
+        CNN_Classifier.compile(optimizer=tf.keras.optimizers.legacy.Adam(learning_rate = 1e-5, decay = 1e-6),
+                               loss=weighted_binary_crossentropy, 
+                               metrics=['categorical_accuracy', 'accuracy', 'mse'])
+    
+    return CNN_Classifier, es, model_checkpoint_callback, tensorboard_callback
 
 
 '''
@@ -135,11 +148,9 @@ a column to label the spectrum.
 - From consolidated csv file split the data set to traininf and validation
 set.
 '''
-# label_name = ['U238', 'Tc99m', 'Pu240', 'Cs137', 'Co60', 'K40', 'U233', 'Co57', 'Th232', 'Am241', 
-#                 'Pu239', 'I131', 'Ra226', 'Ga67', 'Ir192', 'Ba133', 'U235', 'Cf252']
 
-label_name = ['Cs137','Co60','K40','Co57','Am241','I131','Ir192','Ba133']
-# label_name = ['Co57', 'Co60', 'Cr51', 'Cs137', 'F18', 'Ga67', 'I123', 'I125', 'I131', 'In111', 'Ir192', 'Se75', 'Sm153', 'Xe133']
+# label_name = ['Cs137','Co60','K40','Co57','Am241','I131','Ir192','Ba133']
+label_name = []
 label_number = LabelEncoder().fit_transform(label_name)
 
 
@@ -159,65 +170,42 @@ def normalize(arr):
 
 
 
+elements = set()
+# Regular expression to extract element names from filename
+regex = r"\(\((.*?)\),"
 
 #Function to create consolidated dataset
 def consolidated_data(folder_path, output_file):
-    # create the header for the output file
-    header_written = False
-    count = 0
     folders = os.listdir(folder_path)
-    with open(output_file, 'w', newline='') as f_out:
-        csv_writer = csv.writer(f_out)
-        for filename in folders:
-                with open(os.path.join(folder_path, filename), 'r') as f_in: 
-                    print(filename)
-                    csv_reader = csv.reader(f_in)
-                    for row in csv_reader:
-                        if len(row) > 0:
-                            label = filename.split('.')[0]
-                            row = normalize(row)
-                            row = [float(val)*10000 for val in row]
-                            row.append(label_number[label_name.index(label)])
-                            csv_writer.writerow(row)
-                            count = count + 1
+    global label_name
+    for folder in folders:
+        for name in folder.split(","):
+            elements.add(name.replace("'","").replace("(","").replace(")","").replace(" ","")) 
+    label_name = list(elements)    #Add all elements into a list
+    for folder in folders:
+        subfolders = os.listdir(os.path.join(folder_path+"/"+folder))
+        with open(output_file, 'w', newline='') as f_out:
+            csv_writer = csv.writer(f_out)
+            for filename in subfolders:
+                    split_name = re.findall(regex, filename) 
+                    strength_str = re.search(r"array\((.*?)\)", filename).group(1)
+                    strength_str = strength_str.replace('[', '').replace(']', '') # remove any unwanted characters
+                    strength = [float(x.strip()) for x in strength_str.split(",")]
+                    matches = split_name[0].replace("'","").replace(" ","").split(",")
+                    indices = [label_name.index(e.strip("'")) for e in matches]
+                    with open(os.path.join(folder_path+"/"+folder+"/"+filename), 'r') as f_in: 
+                        print(filename)
+                        csv_reader = csv.reader(f_in)
+                        for row in csv_reader:
+                            if len(row) > 0:
+                                label = filename.split('.')[0]
+                                row = normalize(row)
+                                row = [float(val)*100000 for val in row]
+                                row.append([strength[indices.index(i)] if i in indices else 0 for i in range(len(label_name))])
+                                csv_writer.writerow(row)
                     
 
 
-
-
-#Function to create consolidated dataset for pickle files
-
-def consolidated_data_pkl(folder_path, output_file):
-    with open(output_file, 'w', newline='') as f_out:
-        csv_writer = csv.writer(f_out)
-
-        for filename in os.listdir(folder_path):
-            if filename.endswith(".pkl") and filename != output_file:
-                data = np.load(os.path.join(folder_path, filename),allow_pickle=True)
-                spectrum = np.zeros((len(data), 3001), dtype = object)
-                for i, row in enumerate(data):
-                    spectrum[i,:-1] = row[0]
-                    # spectrum[i,-1] = np.array([row[1]])
-                    spectrum[i,-1] = row[1]
-                df = pd.DataFrame(spectrum)
-                # df.to_csv(f_out, index=False, header=False)   
-            print("Finished adding ", filename)
-
-
-# def consolidated_data_pkl(folder_path, output_file):
-#     count = 0
-#     print("Labels : ", label_name)
-#     print("Label Index : ", label_number)
-#     with open(output_file, 'w', newline='') as f_out:
-#         csv_writer = csv.writer(f_out)
-
-#         for filename in os.listdir(folder_path):
-#             if filename.endswith(".pkl") and filename != output_file:
-#                 with open(os.path.join(folder_path, filename), 'rb') as f_in:
-#                     data = pkl.load(f_in)
-#                     name_col = np.full((data.shape[0],1),label_number[label_name.index(filename.split('.')[0])])
-#                     data_with_name = np.concatenate((data,name_col),axis=1)
-#                     csv_writer.writerows(data_with_name)
 
 
 
@@ -262,23 +250,6 @@ Data training :
 - Train and test model.
 '''
 
-#Function to read large csv file. To be used to model's generator function for training.
-# def read_csv(filename):
-#     with open(filename, 'r') as f:
-#         reader = csv.reader(f)
-
-#         for line in reader:
-#             features = [int(float(n)) for n in line[:1500]]
-#             labels = line[-1]
-#             labels = [int(float(n)) for n in labels if n not in ['[', ']']]
-#             features = np.array(features)
-#             features = features.reshape(1500,-1)
-#             mlb = MultiLabelBinarizer(classes=list(range(14)))
-#             label_list = mlb.fit_transform([labels])
-#             label = label_list[0]
-#             yield features,label
-
-
 
 def read_csv(filename):
     with open(filename, 'r') as f:
@@ -287,11 +258,13 @@ def read_csv(filename):
 
         for line in reader:
             features = [np.float64(n) for n in line[:no_of_bins]]
-            label = line[-1]
+            label = ast.literal_eval(line[-1])  # safely evaluate string as Python expression
+            label = np.array(label, dtype=np.float32)
             features = np.array(features)
             features = features.reshape(no_of_bins,-1)
             # features = features*1000  #scale it up cuz the model can't recognize small values
-            yield features, tf.keras.utils.to_categorical(int(label), num_classes=no_of_class)
+            # yield features, tf.keras.utils.to_categorical(int(label), num_classes=no_of_class)
+            yield features, label
 
 
 def generate_predictions(model, generator):
@@ -314,17 +287,18 @@ def main():
     if True:
         # folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data'
         # output_file = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/output.csv'
-        folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/smooth_small_dataset_david'
-        output_file = 'C:/theCave/ISO-ID/data_prep/output_data/smooth_small_dataset_david/output.csv'
+        folder_path = 'C:/theCave/ISO-ID/data_prep/combos/combos_hamm'
+        output_file = 'C:/theCave/ISO-ID/data_prep/output_data/combos_hamm/output.csv'
 
         
         #Merge data
         # consolidated_data_pkl(folder_path, output_file)
-        consolidated_data(folder_path, output_file)
+        # consolidated_data(folder_path, output_file)
+        print(label_name)
         print("....Finished merging dataset......")
 
         #Split data
-        split_dataset(output_file)
+        # split_dataset(output_file)
         print("....Finished splitting dataset......")
 
         # #Read training dataset
@@ -332,7 +306,7 @@ def main():
 
         #Create Dataset using dataset generator 
         # dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(1500,1), dtype=tf.uint16),tf.TensorSpec(shape=([14]), dtype=tf.uint8)))
-        dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(no_of_bins,1), dtype=tf.dtypes.float64), tf.TensorSpec(shape=([no_of_class]))))
+        dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(no_of_bins,1), dtype=tf.dtypes.float64), tf.TensorSpec(shape=(no_of_class,))))
 
 
         dataset = dataset.shuffle(1000)
@@ -341,7 +315,7 @@ def main():
         #Read Validation dataset
         val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
         # val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([1500,1]),tf.TensorShape([14])))
-        val_ds = tf.data.Dataset.from_generator(val_ds, output_signature=(tf.TensorSpec(shape=(no_of_bins,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=([no_of_class]))))
+        val_ds = tf.data.Dataset.from_generator(val_ds, output_signature=(tf.TensorSpec(shape=(no_of_bins,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=(no_of_class,))))
 
 
         val_ds = val_ds.batch(256).prefetch(3)

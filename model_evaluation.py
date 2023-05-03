@@ -8,6 +8,7 @@ import pandas as pd
 import csv
 import matplotlib.pyplot as plt
 import os
+import ast
 
 from tensorflow.python.ops.numpy_ops import np_config
 np_config.enable_numpy_behavior()
@@ -18,6 +19,11 @@ label_name = ['Cs137','Co60','K40','Co57','Am241','I131','Ir192','Ba133']
 # label_name = ['Co57', 'Co60', 'Cr51', 'Cs137', 'F18', 'Ga67', 'I123', 'I125', 'I131', 'In111', 'Ir192', 'Se75', 'Sm153', 'Xe133']
 label_number = LabelEncoder().fit_transform(label_name).tolist()
 
+
+no_of_bins = 1500
+no_of_class = 9
+pos_weight = 1
+neg_weight = 1
 
 def normalize(arr):
     """
@@ -64,20 +70,15 @@ def read_csv(filename):
         reader = csv.reader(f)
         count = 0
 
-        glob_labels  = []
-        glob_features = []
         for line in reader:
-            # print('line : ' ,line)
-            if count == 1 : 
-                glob_features = []
-                glob_labels = []
-        # record = line.rstrip().split(',').astype(int)
-            features = [np.float64(n) for n in line[:1500]]
-            label = line[-1]
+            features = [np.float64(n) for n in line[:no_of_bins]]
+            label = ast.literal_eval(line[-1])  # safely evaluate string as Python expression
+            label = np.array(label, dtype=np.float32)
             features = np.array(features)
-            features = features.reshape(1500,-1)
-            # features = features*1000
-            yield features, tf.keras.utils.to_categorical(int(label), num_classes=8)
+            features = features.reshape(no_of_bins,-1)
+            # features = features*1000  #scale it up cuz the model can't recognize small values
+            # yield features, tf.keras.utils.to_categorical(int(label), num_classes=no_of_class)
+            yield features, label
 
 
 
@@ -130,20 +131,20 @@ def main():
     # rnd_model = load('C:/theCave/ISO-ID/train/trained_models/cnn_rf.joblib')
     val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
     # val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([3000,1]),tf.TensorShape([18])))
-    val_ds = tf.data.Dataset.from_generator(val_ds, output_signature=(tf.TensorSpec(shape=(1500,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=([8]))))
+    val_ds = tf.data.Dataset.from_generator(val_ds, output_signature=(tf.TensorSpec(shape=(no_of_bins,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=(no_of_class,))))
     val_ds = val_ds.batch(256).prefetch(3)
    
     test_data_folder = 'C:/theCave/ISO-ID/captures/captures_for_test'
 
     list_of_model = [svm_model,knn,nb,lr]
-    if True:                  #Field Test
+    if False:                  #Field Test
         model_field_test(test_data_folder,list_of_model, cnn_model)
 
 
 
-    if False:                  #Model Evaluate
-        models = [cnn_model, svm_model, knn, nb, lr]
-        model_names = ['CNN', 'SVM', 'KNN', 'NB', 'LR']
+    if True:                  #Model Evaluate
+        models = [cnn_model]
+        model_names = ['CNN']
         results = []
         confusion_matrices = []
         reshape = False
