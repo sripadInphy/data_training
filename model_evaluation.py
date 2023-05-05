@@ -99,13 +99,14 @@ def model_field_test(folder_path, models,cnn_model):
     for file in files:
         df = pd.read_csv(os.path.join(folder_path, file))
         data = df.iloc[:, 1]
-        spectrum = np.append(data.values, [0]*1501)
+        spectrum = np.append(data.values, [0]*(no_of_bins-1499))
         spectrum = normalize(spectrum)
         spectrum = [float(val)*10000 for val in spectrum]
         spectrum = np.array(spectrum)
         label = file.split('.')[0]
         ind_result = [label]
-        ind_result.append(label_name[label_number.index(cnn_model.predict(spectrum.reshape(1,3000,1)).argmax())])
+        # ind_result.append(label_name[label_number.index(cnn_model.predict(spectrum.reshape(1,no_of_bins,1)).argmax())])
+        ind_result.append(cnn_model.predict(spectrum.reshape(1,no_of_bins,1)).argmax())
         # ind_result.append(cnn_model.predict(spectrum.reshape(1,3000,1)).argmax())
         for model in models:
             result = model.predict(spectrum.reshape(1, 3000))
@@ -124,11 +125,12 @@ def model_field_test(folder_path, models,cnn_model):
 
 def main():
     print("*********Model Evaluation****************")
-    cnn_model = load('C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
-    svm_model = load('C:/theCave/ISO-ID/train/trained_models/svm.joblib')
-    knn = load('C:/theCave/ISO-ID/train/trained_models/knn.joblib')
-    nb = load('C:/theCave/ISO-ID/train/trained_models/nb.joblib')
-    lr = load('C:/theCave/ISO-ID/train/trained_models/lr.joblib')
+    cnn_model = load('C:/theCave/ISO-ID/train/trained_models/hammamtsu_8_isotopes/cnn.joblib')
+    # cnn_model = load('C:/theCave/ISO-ID/train/trained_models/90_percent_test_accuracy/cnn.joblib')
+    # svm_model = load('C:/theCave/ISO-ID/train/trained_models/svm.joblib')
+    # knn = load('C:/theCave/ISO-ID/train/trained_models/knn.joblib')
+    # nb = load('C:/theCave/ISO-ID/train/trained_models/nb.joblib')
+    # lr = load('C:/theCave/ISO-ID/train/trained_models/lr.joblib')
     # rnd_model = load('C:/theCave/ISO-ID/train/trained_models/cnn_rf.joblib')
     val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
     # val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([3000,1]),tf.TensorShape([18])))
