@@ -14,10 +14,11 @@ np_config.enable_numpy_behavior()
 
 # label_name = ['U', 'Tc', 'Pu', 'Cs', 'Co', 'K', 'U', 'Co57', 'Th', 'Am', 
 #                     'Pu239', 'I', 'Ra', 'Ga', 'Ir', 'Ba', 'U235', 'Cf252']
-label_name = ['Cs137','Co60','K40','Co57','Am241','I131','Ir192','Ba133']
+label_name = ['Cs137','Co60','Ga67','Co57','K40','I131','Ir192','Ba133','BCK']
 # label_name = ['Co57', 'Co60', 'Cr51', 'Cs137', 'F18', 'Ga67', 'I123', 'I125', 'I131', 'In111', 'Ir192', 'Se75', 'Sm153', 'Xe133']
 label_number = LabelEncoder().fit_transform(label_name).tolist()
-
+no_of_bins = 3000
+no_of_class = 9
 
 def normalize(arr):
     """
@@ -77,7 +78,7 @@ def read_csv(filename):
             features = np.array(features)
             features = features.reshape(1500,-1)
             # features = features*1000
-            yield features, tf.keras.utils.to_categorical(int(label), num_classes=8)
+            yield features, tf.keras.utils.to_categorical(int(label), num_classes=9)
 
 
 
@@ -98,15 +99,16 @@ def model_field_test(folder_path, models,cnn_model):
     for file in files:
         df = pd.read_csv(os.path.join(folder_path, file))
         data = df.iloc[:, 1]
-        spectrum = np.append(data.values, [0])
+        spectrum = np.append(data.values, [0]*1501)
         spectrum = normalize(spectrum)
         spectrum = [float(val)*10000 for val in spectrum]
         spectrum = np.array(spectrum)
         label = file.split('.')[0]
         ind_result = [label]
-        ind_result.append(label_name[label_number.index(cnn_model.predict(spectrum.reshape(1,1500,1)).argmax())])
+        ind_result.append(label_name[label_number.index(cnn_model.predict(spectrum.reshape(1,3000,1)).argmax())])
+        # ind_result.append(cnn_model.predict(spectrum.reshape(1,3000,1)).argmax())
         for model in models:
-            result = model.predict(spectrum.reshape(1, 1500))
+            result = model.predict(spectrum.reshape(1, 3000))
             ind_result.append(label_name[label_number.index(result[0])])
         results.append(ind_result)
     # print("Isotope    |  CNN   |   SVM   |   NB   |   LR   | KNN")
@@ -135,7 +137,7 @@ def main():
    
     test_data_folder = 'C:/theCave/ISO-ID/captures/captures_for_test'
 
-    list_of_model = [svm_model,knn,nb,lr]
+    list_of_model = []
     if True:                  #Field Test
         model_field_test(test_data_folder,list_of_model, cnn_model)
 

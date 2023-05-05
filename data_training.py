@@ -36,8 +36,8 @@ from sklearn.linear_model import LogisticRegression
 
 
 
-no_of_bins = 1500
-no_of_class = 8
+no_of_bins = 3000
+no_of_class = 9
 
 '''
 Model Creation
@@ -138,7 +138,7 @@ set.
 # label_name = ['U238', 'Tc99m', 'Pu240', 'Cs137', 'Co60', 'K40', 'U233', 'Co57', 'Th232', 'Am241', 
 #                 'Pu239', 'I131', 'Ra226', 'Ga67', 'Ir192', 'Ba133', 'U235', 'Cf252']
 
-label_name = ['Cs137','Co60','K40','Co57','Am241','I131','Ir192','Ba133']
+label_name = ['Cs137','Co60','Ga67','Co57','K40','I131','Ir192','Ba133','bck']
 # label_name = ['Co57', 'Co60', 'Cr51', 'Cs137', 'F18', 'Ga67', 'I123', 'I125', 'I131', 'In111', 'Ir192', 'Se75', 'Sm153', 'Xe133']
 label_number = LabelEncoder().fit_transform(label_name)
 
@@ -194,14 +194,17 @@ def consolidated_data_pkl(folder_path, output_file):
         for filename in os.listdir(folder_path):
             if filename.endswith(".pkl") and filename != output_file:
                 data = np.load(os.path.join(folder_path, filename),allow_pickle=True)
-                spectrum = np.zeros((len(data), 3001), dtype = object)
+                spectrum = np.zeros((len(data), no_of_bins+1), dtype = object)
                 for i, row in enumerate(data):
-                    spectrum[i,:-1] = row[0]
+                    norm_row = row[0][:no_of_bins]
+                    norm_row = normalize(norm_row)
+                    norm_row = [float(val)*10000 for val in norm_row]
+                    spectrum[i,:-1] = norm_row
                     # spectrum[i,-1] = np.array([row[1]])
                     spectrum[i,-1] = row[1]
                 df = pd.DataFrame(spectrum)
-                # df.to_csv(f_out, index=False, header=False)   
-            print("Finished adding ", filename)
+                df.to_csv(f_out, index=False, header=False)   
+                print("Finished adding ", filename)
 
 
 # def consolidated_data_pkl(folder_path, output_file):
@@ -314,13 +317,13 @@ def main():
     if True:
         # folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data'
         # output_file = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/output.csv'
-        folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/smooth_small_dataset_david'
-        output_file = 'C:/theCave/ISO-ID/data_prep/output_data/smooth_small_dataset_david/output.csv'
+        folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/Hammamatsu_8_captures'
+        output_file = 'C:/theCave/ISO-ID/data_prep/output_data/Hammamatsu_8_captures/output.csv'
 
         
         #Merge data
-        # consolidated_data_pkl(folder_path, output_file)
-        consolidated_data(folder_path, output_file)
+        consolidated_data_pkl(folder_path, output_file)
+        # consolidated_data(folder_path, output_file)
         print("....Finished merging dataset......")
 
         #Split data
@@ -346,7 +349,7 @@ def main():
 
         val_ds = val_ds.batch(256).prefetch(3)
         cnn_model,es,model_checkpoint_callback,tboard = create_cnn()
-        history = cnn_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es, model_checkpoint_callback,tboard], verbose=2)        #Early stopping removed
+        history = cnn_model.fit(dataset,validation_data = val_ds ,epochs = 25, callbacks = [es, model_checkpoint_callback,tboard], verbose=2)        #Early stopping removed
         
         dump(cnn_model, 'C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
 
@@ -356,18 +359,18 @@ def main():
 
 
 
-        #Extract features using CNN Model
-        cnn_predictions, cnn_labels = generate_predictions(cnn_model, dataset)
+        # #Extract features using CNN Model
+        # cnn_predictions, cnn_labels = generate_predictions(cnn_model, dataset)
 
-        # Flatten the features for SVM and Random Forest
-        cnn_predictions = cnn_predictions.reshape(len(cnn_predictions), -1)
-        # Make Labels a 1-D array 
-        cnn_labels = np.argmax(cnn_labels, axis=1)
-        #Train SVM model 
-        svm = SVC(kernel='rbf', C=1.0, gamma='scale')
-        svm.fit(cnn_predictions, cnn_labels)
+        # # Flatten the features for SVM and Random Forest
+        # cnn_predictions = cnn_predictions.reshape(len(cnn_predictions), -1)
+        # # Make Labels a 1-D array 
+        # cnn_labels = np.argmax(cnn_labels, axis=1)
+        # #Train SVM model 
+        # svm = SVC(kernel='rbf', C=1.0, gamma='scale')
+        # svm.fit(cnn_predictions, cnn_labels)
 
-        dump(svm, 'C:/theCave/ISO-ID/train/trained_models/cnn_svm.joblib')
+        # dump(svm, 'C:/theCave/ISO-ID/train/trained_models/cnn_svm.joblib')
 
     '''
     Other classifiers 
