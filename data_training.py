@@ -20,7 +20,7 @@ from tensorflow.keras.optimizers import Adam
 from sklearn.preprocessing import LabelEncoder, MultiLabelBinarizer
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from joblib import dump,load
 import keras.backend as K
 import csv
@@ -41,7 +41,7 @@ from sklearn.linear_model import LogisticRegression
 
 no_of_bins = 1500
 no_of_class = 9
-pos_weight = 1
+pos_weight = 5
 neg_weight = 1
 
 '''
@@ -49,26 +49,27 @@ Model Creation
 '''
 def create_cnn():
 
-    with tf.device('/GPU:0'):
-        CNN_Classifier = Sequential()
-        #### FIRST LAYER ####
-        CNN_Classifier.add(Conv1D(32,(3), input_shape=(no_of_bins,1)))
-        CNN_Classifier.add(Activation("relu"))
-        CNN_Classifier.add(MaxPooling1D(pool_size = (2)))
-        CNN_Classifier.add(Flatten())
 
-        #### SECOND LAYER ####
-        CNN_Classifier.add(Dense(64))
-        CNN_Classifier.add(Activation("relu"))
-        CNN_Classifier.add(Dropout(0.2))
-        
-        #### THIRD LAYER ####
-        CNN_Classifier.add(Dense(32))
-        CNN_Classifier.add(Activation("relu"))
-        CNN_Classifier.add(Dropout(0.2))
-        
-        #### OUTPUT LAYER ####
-        CNN_Classifier.add(Dense(no_of_class, activation='sigmoid'))
+    CNN_Classifier = Sequential()
+    #### FIRST LAYER ####
+    CNN_Classifier.add(Conv1D(32,(3), input_shape=(no_of_bins,1)))
+    CNN_Classifier.add(Activation("relu"))
+    CNN_Classifier.add(MaxPooling1D(pool_size = (2)))
+    CNN_Classifier.add(Flatten())
+
+    #### SECOND LAYER ####
+    CNN_Classifier.add(Dense(64))
+    CNN_Classifier.add(Activation("relu"))
+    CNN_Classifier.add(Dropout(0.2))
+    
+    #### THIRD LAYER ####
+    CNN_Classifier.add(Dense(32))
+    CNN_Classifier.add(Activation("relu"))
+    CNN_Classifier.add(Dropout(0.2))
+
+    
+    #### OUTPUT LAYER ####
+    CNN_Classifier.add(Dense(no_of_class, activation='sigmoid'))
         
     es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience = 10)
     fname = os.path.sep.join(['C:/theCave/ISO-ID/data_prep/weights/',
@@ -85,24 +86,27 @@ def create_cnn():
         save_best_only=True,
         verbose=1)
 
-    with tf.device('/GPU:0'):
-        # Define the weighted binary cross-entropy loss function
-        def weighted_binary_crossentropy(y_true, y_pred):
-            # Get the binary cross-entropy loss
-            bce = K.binary_crossentropy(y_true, y_pred)
-
-            # Apply the sample weights
-            weight_vector = y_true * pos_weight + (1. - y_true) * neg_weight
-            weighted_bce = weight_vector * bce
-
-            # Return the mean over all samples
-            return K.mean(weighted_bce)
-
-        CNN_Classifier.compile(optimizer=tf.keras.optimizers.legacy.Adam(learning_rate = 1e-5, decay = 1e-6),
-                               loss=weighted_binary_crossentropy, 
-                               metrics=['categorical_accuracy', 'accuracy', 'mse'])
     
-    return CNN_Classifier, es, model_checkpoint_callback, tensorboard_callback
+    def class_loss(y_true, y_pred):
+        class_loss = tf.keras.losses.CategoricalCrossentropy()(y_true, y_pred)
+        # Find the indices of true labels that contain the isotopes
+        tf.print("Class loss : ",class_loss)
+        return 10*class_loss
+    
+    def conc_loss(y_true,y_pred):
+        nonzero_labels = tf.where(tf.not_equal(y_true[:, :], 0))
+        row_indices = nonzero_labels[:, 0]
+        col_indices = nonzero_labels[:, 1]
+        y_true_nonzero = tf.gather_nd(y_true[:, :], nonzero_labels)
+        # Calculate the concentration loss for the predicted isotopes
+        concentration_loss = tf.reduce_sum(tf.abs(tf.gather_nd(y_pred[:, :], nonzero_labels) - tf.gather_nd(y_true[:, :], nonzero_labels)) * y_true_nonzero) / tf.reduce_sum(y_true[:, :])# Calculate weighted concentration loss
+        # concentration_loss = tf.reduce_sum(tf.abs(tf.multiply(y_true[:,1:], y_true[:,0][:,tf.newaxis]) - tf.multiply(y_pred[:,1:], y_true[:,0][:,tf.newaxis])))
+        tf.print("Concen loss : ",concentration_loss)
+        return 10*concentration_loss
+
+
+    
+    return CNN_Classifier, es, model_checkpoint_callback, tensorboard_callback, class_loss, conc_loss
 
 
 '''
@@ -117,7 +121,7 @@ def plot_model_history(model_name, history, epochs):
   
   # summarize history for accuracy
   plt.subplot(1, 2 ,1)
-  plt.plot(np.arange(0, len(history['accuracy'])), history['accuracy'], 'r')
+  plt.plot(np.arange(0, len(history['mae'])), history['mae'], 'r')
   plt.plot(np.arange(1, len(history['val_accuracy'])+1), history['val_accuracy'], 'g')
   plt.xticks(np.arange(0, epochs+1, epochs/10))
   plt.title('Training Accuracy vs. Validation Accuracy')
@@ -182,28 +186,28 @@ def consolidated_data(folder_path, output_file):
         for name in folder.split(","):
             elements.add(name.replace("'","").replace("(","").replace(")","").replace(" ","")) 
     label_name = list(elements)    #Add all elements into a list
-    for folder in folders:
-        subfolders = os.listdir(os.path.join(folder_path+"/"+folder))
-        with open(output_file, 'w', newline='') as f_out:
+    with open(output_file, 'w', newline='') as f_out:
             csv_writer = csv.writer(f_out)
-            for filename in subfolders:
-                    split_name = re.findall(regex, filename) 
-                    strength_str = re.search(r"array\((.*?)\)", filename).group(1)
-                    strength_str = strength_str.replace('[', '').replace(']', '') # remove any unwanted characters
-                    strength = [float(x.strip()) for x in strength_str.split(",")]
-                    matches = split_name[0].replace("'","").replace(" ","").split(",")
-                    indices = [label_name.index(e.strip("'")) for e in matches]
-                    with open(os.path.join(folder_path+"/"+folder+"/"+filename), 'r') as f_in: 
-                        print(filename)
-                        csv_reader = csv.reader(f_in)
-                        for row in csv_reader:
-                            if len(row) > 0:
-                                label = filename.split('.')[0]
-                                row = normalize(row)
-                                row = [float(val)*100000 for val in row]
-                                row.append([strength[indices.index(i)] if i in indices else 0 for i in range(len(label_name))])
-                                csv_writer.writerow(row)
-                    
+            for folder in folders:
+                subfolders = os.listdir(os.path.join(folder_path+"/"+folder))
+                for filename in subfolders:
+                        split_name = re.findall(regex, filename) 
+                        strength_str = re.search(r"array\((.*?)\)", filename).group(1)
+                        strength_str = strength_str.replace('[', '').replace(']', '') # remove any unwanted characters
+                        strength = [float(x.strip()) for x in strength_str.split(",")]
+                        matches = split_name[0].replace("'","").replace(" ","").split(",")
+                        indices = [label_name.index(e.strip("'")) for e in matches]
+                        with open(os.path.join(folder_path+"/"+folder+"/"+filename), 'r') as f_in: 
+                            print(filename)
+                            csv_reader = csv.reader(f_in)
+                            for row in csv_reader:
+                                if len(row) > 0:
+                                    label = filename.split('.')[0]
+                                    row = normalize(row)
+                                    row = [float(val)*100000 for val in row]
+                                    row.append([strength[indices.index(i)] if i in indices else 0 for i in range(len(label_name))])
+                                    csv_writer.writerow(row)
+                        
 
 
 
@@ -301,47 +305,64 @@ def main():
         # split_dataset(output_file)
         print("....Finished splitting dataset......")
 
-        # #Read training dataset
+        #Read training dataset
         tf_ds = lambda: read_csv('C:/theCave/ISO-ID/train/train_select.csv')
+        tf_ds_conc =  lambda: read_csv('C:/theCave/ISO-ID/train/train_select.csv')
 
         #Create Dataset using dataset generator 
         # dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(1500,1), dtype=tf.uint16),tf.TensorSpec(shape=([14]), dtype=tf.uint8)))
         dataset = tf.data.Dataset.from_generator(tf_ds,output_signature=(tf.TensorSpec(shape=(no_of_bins,1), dtype=tf.dtypes.float64), tf.TensorSpec(shape=(no_of_class,))))
-
+        dataset_conc = tf.data.Dataset.from_generator(tf_ds_conc,output_signature=(tf.TensorSpec(shape=(no_of_bins,1), dtype=tf.dtypes.float64), tf.TensorSpec(shape=(no_of_class,))))
 
         dataset = dataset.shuffle(1000)
         dataset = dataset.batch(256).prefetch(3)
+
+        dataset_conc = dataset_conc.shuffle(1000)
+        dataset_conc = dataset_conc.batch(256).prefetch(3)
 
         #Read Validation dataset
         val_ds = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
         # val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([1500,1]),tf.TensorShape([14])))
         val_ds = tf.data.Dataset.from_generator(val_ds, output_signature=(tf.TensorSpec(shape=(no_of_bins,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=(no_of_class,))))
 
+        val_ds_conc = lambda: read_csv('C:/theCave/ISO-ID/train/validation_select.csv')
+        # val_ds = tf.data.Dataset.from_generator(val_ds, output_types = (tf.float32, tf.int64), output_shapes = (tf.TensorShape([1500,1]),tf.TensorShape([14])))
+        val_ds_conc = tf.data.Dataset.from_generator(val_ds_conc, output_signature=(tf.TensorSpec(shape=(no_of_bins,1),dtype=tf.dtypes.float64), tf.TensorSpec(shape=(no_of_class,))))
+
 
         val_ds = val_ds.batch(256).prefetch(3)
-        cnn_model,es,model_checkpoint_callback,tboard = create_cnn()
-        history = cnn_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [es, model_checkpoint_callback,tboard], verbose=2)        #Early stopping removed
-        
-        dump(cnn_model, 'C:/theCave/ISO-ID/train/trained_models/cnn.joblib')
+        val_ds_conc = val_ds_conc.batch(256).prefetch(3)
+        class_model,es,model_checkpoint_callback,tboard,class_loss,conc_less = create_cnn()
+        conc_model,es,model_checkpoint_callback,tboard,class_loss,conc_less = create_cnn()
+        class_model.compile(optimizer=tf.keras.optimizers.legacy.Adam(learning_rate = 1e-5, decay = 1e-6),
+                        loss=class_loss, 
+                        metrics=['categorical_accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()])
+        conc_model.compile(optimizer=tf.keras.optimizers.legacy.Adam(learning_rate = 1e-5, decay = 1e-6),
+                        loss=conc_less, 
+                        metrics=[ 'mae', 'mse'])
+        history = class_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [model_checkpoint_callback,tboard], verbose=2)        #Early stopping removed
+        history = conc_model.fit(dataset_conc,validation_data = val_ds_conc ,epochs = 100, callbacks = [model_checkpoint_callback,tboard], verbose=2)
+        dump(class_model, 'C:/theCave/ISO-ID/train/trained_models/cnn_class.joblib')
+        dump(conc_model, 'C:/theCave/ISO-ID/train/trained_models/cnn_conc.joblib')
 
-        plot_model_history('CNN', history.history,100)
+        # plot_model_history('CNN', history.history,100)
 
 
 
 
 
-        #Extract features using CNN Model
-        cnn_predictions, cnn_labels = generate_predictions(cnn_model, dataset)
+        # #Extract features using CNN Model
+        # cnn_predictions, cnn_labels = generate_predictions(cnn_model, dataset)
 
-        # Flatten the features for SVM and Random Forest
-        cnn_predictions = cnn_predictions.reshape(len(cnn_predictions), -1)
-        # Make Labels a 1-D array 
-        cnn_labels = np.argmax(cnn_labels, axis=1)
-        #Train SVM model 
-        svm = SVC(kernel='rbf', C=1.0, gamma='scale')
-        svm.fit(cnn_predictions, cnn_labels)
+        # # Flatten the features for SVM and Random Forest
+        # cnn_predictions = cnn_predictions.reshape(len(cnn_predictions), -1)
+        # # Make Labels a 1-D array 
+        # cnn_labels = np.argmax(cnn_labels, axis=1)
+        # #Train SVM model 
+        # svm = SVC(kernel='rbf', C=1.0, gamma='scale')
+        # svm.fit(cnn_predictions, cnn_labels)
 
-        dump(svm, 'C:/theCave/ISO-ID/train/trained_models/cnn_svm.joblib')
+        # dump(svm, 'C:/theCave/ISO-ID/train/trained_models/cnn_svm.joblib')
 
     '''
     Other classifiers 
