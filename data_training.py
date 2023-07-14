@@ -88,9 +88,9 @@ def create_cnn():
 
     
     def class_loss(y_true, y_pred):
-        class_loss = tf.keras.losses.CategoricalCrossentropy()(y_true, y_pred)
-        # Find the indices of true labels that contain the isotopes
-        tf.print("Class loss : ",class_loss)
+        y_true_binary = tf.where(tf.not_equal(y_true, 0),  tf.constant(1, dtype=tf.float32), y_true)
+        class_loss = tf.keras.losses.BinaryCrossentropy()(y_true_binary, y_pred)     #be carefull in what loss function are you using
+        # tf.print("Class loss : ",class_loss)
         return 10*class_loss
     
     def conc_loss(y_true,y_pred):
@@ -100,12 +100,11 @@ def create_cnn():
         y_true_nonzero = tf.gather_nd(y_true[:, :], nonzero_labels)
         # Calculate the concentration loss for the predicted isotopes
         concentration_loss = tf.reduce_sum(tf.abs(tf.gather_nd(y_pred[:, :], nonzero_labels) - tf.gather_nd(y_true[:, :], nonzero_labels)) * y_true_nonzero) / tf.reduce_sum(y_true[:, :])# Calculate weighted concentration loss
-        # concentration_loss = tf.reduce_sum(tf.abs(tf.multiply(y_true[:,1:], y_true[:,0][:,tf.newaxis]) - tf.multiply(y_pred[:,1:], y_true[:,0][:,tf.newaxis])))
-        tf.print("Concen loss : ",concentration_loss)
+        
+        # concentration_loss = tf.keras.losses.MeanSquaredError()(tf.gather_nd(y_pred[:, :], nonzero_labels), tf.gather_nd(y_true[:, :], nonzero_labels))
+        # tf.print("Concen loss : ",concentration_loss)
         return 10*concentration_loss
-
-
-    
+ 
     return CNN_Classifier, es, model_checkpoint_callback, tensorboard_callback, class_loss, conc_loss
 
 
@@ -207,6 +206,58 @@ def consolidated_data(folder_path, output_file):
                                     row = [float(val)*100000 for val in row]
                                     row.append([strength[indices.index(i)] if i in indices else 0 for i in range(len(label_name))])
                                     csv_writer.writerow(row)
+
+def extract_element_names(filename, output_list):                    
+    pattern = r"combos_\(\((.*?)\)"
+    match = re.search(pattern, filename)
+    if match:
+        elements = match.group(1).split(", ")
+        element_names = [element.strip("'") for element in elements]
+        for element in element_names:
+            if element not in output_list:
+                output_list.append(element)
+    return output_list
+
+
+def extract_strength(filename):
+    pattern = r"array\(\[(.*?)\]\)"
+    match = re.search(pattern, filename)
+    if match:
+        strength_string = match.group(1)
+        strengths = [float(strength) for strength in strength_string.split(",")]
+        return strengths
+    else:
+        return None
+
+#Function to create consolidated dataset
+def consolidated_data_pkl(folder_path, output_file):
+    count = 0
+    folders = os.listdir(folder_path)
+    global label_name
+    for folder in folders:
+        label_name = extract_element_names(folder,label_name)
+    with open(output_file, 'w', newline='') as f_out:
+            csv_writer = csv.writer(f_out)
+            for folder in folders:
+                element_names = []
+                element_names = extract_element_names(folder,element_names)
+                element_strength = extract_strength(folder)
+                indices = [label_name.index(e) for e in element_names]
+                with open(os.path.join(folder_path, folder), 'rb') as f_in:
+                    data = pkl.load(f_in)
+                    for row in data:
+                        if len(row) > 0:
+                            output_row = normalize(row[0])
+                            output_row = [float(val)*100000 for val in output_row]
+                            # row.append([element_strength[indices.index(i)] if i in indices else 0 for i in range(len(label_name))])
+                            if isinstance(row[1],int):
+                                output_row.append("["+str(row[1])+"]")   
+                            else:
+                                output_row.append(np.array2string(row[1], separator=','))
+                            csv_writer.writerow(output_row)
+                            count = count + 1
+
+
                         
 
 
@@ -291,8 +342,8 @@ def main():
     if True:
         # folder_path = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data'
         # output_file = 'C:/theCave/ISO-ID/data_prep/output_data/single_isotope_data/output.csv'
-        folder_path = 'C:/theCave/ISO-ID/data_prep/combos/combos_hamm'
-        output_file = 'C:/theCave/ISO-ID/data_prep/output_data/combos_hamm/output.csv'
+        folder_path = 'C:/theCave/ISO-ID/data_prep/dataprep_hamm_modified/Data_2_9000000/Data'
+        output_file = 'C:/theCave/ISO-ID/data_prep/output_data/dataprep_hamm_modified/output.csv'
 
         
         #Merge data
@@ -337,32 +388,17 @@ def main():
         class_model.compile(optimizer=tf.keras.optimizers.legacy.Adam(learning_rate = 1e-5, decay = 1e-6),
                         loss=class_loss, 
                         metrics=['categorical_accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()])
+        dump(class_model, 'C:/theCave/ISO-ID/train/trained_models/cnn_class.joblib')
         conc_model.compile(optimizer=tf.keras.optimizers.legacy.Adam(learning_rate = 1e-5, decay = 1e-6),
                         loss=conc_less, 
                         metrics=[ 'mae', 'mse'])
         history = class_model.fit(dataset,validation_data = val_ds ,epochs = 100, callbacks = [model_checkpoint_callback,tboard], verbose=2)        #Early stopping removed
         history = conc_model.fit(dataset_conc,validation_data = val_ds_conc ,epochs = 100, callbacks = [model_checkpoint_callback,tboard], verbose=2)
-        dump(class_model, 'C:/theCave/ISO-ID/train/trained_models/cnn_class.joblib')
+        
         dump(conc_model, 'C:/theCave/ISO-ID/train/trained_models/cnn_conc.joblib')
 
         # plot_model_history('CNN', history.history,100)
 
-
-
-
-
-        # #Extract features using CNN Model
-        # cnn_predictions, cnn_labels = generate_predictions(cnn_model, dataset)
-
-        # # Flatten the features for SVM and Random Forest
-        # cnn_predictions = cnn_predictions.reshape(len(cnn_predictions), -1)
-        # # Make Labels a 1-D array 
-        # cnn_labels = np.argmax(cnn_labels, axis=1)
-        # #Train SVM model 
-        # svm = SVC(kernel='rbf', C=1.0, gamma='scale')
-        # svm.fit(cnn_predictions, cnn_labels)
-
-        # dump(svm, 'C:/theCave/ISO-ID/train/trained_models/cnn_svm.joblib')
 
     '''
     Other classifiers 
