@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from joblib import load
 from custom_loss import class_loss, conc_loss
 
@@ -20,33 +19,63 @@ validation_labels = np.array([x for x in validation_dataset.iloc[:, -1].values])
 class_model.compile(loss=class_loss)
 conc_model.compile(loss=conc_loss)
 
-
 # Make predictions using the trained models
 class_predictions = class_model.predict(validation_features)
 conc_predictions = conc_model.predict(validation_features)
 
-# Visualize the results for a random validation sample
-random_index = np.random.randint(0, len(validation_features))
-spectrum = validation_features[random_index].reshape(-1)
-true_label = validation_labels[random_index]
-predicted_label = class_predictions[random_index]
-concentrations = conc_predictions[random_index]
+# Visualize the results for all validation samples
+num_samples = len(validation_features)
 
-# Plot the spectrum
-plt.plot(spectrum)
-plt.title("Validation Spectrum")
-plt.xlabel("Bin Index")
-plt.ylabel("Intensity")
-plt.show()
+# Create a list to store the results for each spectrum
+results_list = []
+threshold = 0.6
+for i in range(num_samples):
+    spectrum = validation_features[i].reshape(-1)
+    true_label = np.array(
+        [
+            float(val)
+            for val in validation_labels[i].replace("[", "").replace("]", "").split(",")
+        ]
+    )
+    predicted_label = class_predictions[i]
+    concentrations = np.round(
+        conc_predictions[i], 2
+    )  # Round predicted values to two decimal places
 
-# Print the true label and predicted label
-print("True Label (Isotope Class):", true_label)
-print("Predicted Label (Isotope Class):", predicted_label)
+    # Create a new list with zeros
+    high_concentrations = np.zeros_like(concentrations)
 
-# Print the predicted concentrations
-print("Predicted Concentrations:", concentrations)
+    # Set the values to concentrations where predicted_label > threshold
+    high_concentrations[predicted_label > threshold] = concentrations[
+        predicted_label > threshold
+    ]
 
-# Objective value for the prediction result (you can use any appropriate metric)
-# Let's use mean squared error for the concentration predictions
-mse = np.mean((true_label - concentrations) ** 2)
-print("Mean Squared Error for Concentrations:", mse)
+    # Calculate the mean absolute error for the concentrations
+    mae_concentration = np.mean(np.abs(true_label - high_concentrations))
+
+    # Add the results to the list
+    results_list.append(
+        [
+            i + 1,
+            true_label.tolist(),
+            [round(val, 2) for val in predicted_label],
+            [round(val, 2) for val in high_concentrations],
+            mae_concentration,
+        ]
+    )
+
+# Create a DataFrame with the results and save it to a CSV file
+result_df = pd.DataFrame(
+    results_list,
+    columns=[
+        "Spectrum Number",
+        "True Values",
+        "Class prediction",
+        "Conc Predictions",
+        "Mean Absolute Error",
+    ],
+)
+result_df.to_csv("model_test_report.csv", index=False)
+
+# Print the DataFrame with results
+print(result_df)
