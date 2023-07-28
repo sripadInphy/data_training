@@ -28,7 +28,7 @@ num_samples = len(validation_features)
 
 # Create a list to store the results for each spectrum
 results_list = []
-threshold = 0.6
+
 for i in range(num_samples):
     spectrum = validation_features[i].reshape(-1)
     true_label = np.array(
@@ -44,8 +44,8 @@ for i in range(num_samples):
 
     # Create a new list with zeros
     high_concentrations = np.zeros_like(concentrations)
-
-    # Set the values to concentrations where predicted_label > threshold
+    threshold = 0.6
+    # Set the values to concentrations where predicted_label > 0.8
     high_concentrations[predicted_label > threshold] = concentrations[
         predicted_label > threshold
     ]
@@ -61,6 +61,7 @@ for i in range(num_samples):
             [round(val, 2) for val in predicted_label],
             [round(val, 2) for val in high_concentrations],
             mae_concentration,
+            spectrum.tolist(),
         ]
     )
 
@@ -71,11 +72,12 @@ result_df = pd.DataFrame(
         "Spectrum Number",
         "True Values",
         "Class prediction",
-        "Conc Predictions",
+        "High Concentrations",
         "Mean Absolute Error",
+        "Spectrums",
     ],
 )
 result_df.to_csv("model_test_report.csv", index=False)
 
-# Print the DataFrame with results
-print(result_df)
+# Print "Testing Finished" when the testing is completed
+print("Testing Finished")
