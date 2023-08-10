@@ -29,9 +29,11 @@ from sklearn.linear_model import LogisticRegression
 
 from keras_tuner.tuners import RandomSearch
 from keras_tuner.engine.hyperparameters import HyperParameters
+from keras.layers import BatchNormalization
 
 
 from custom_loss import class_loss, conc_loss
+
 
 no_of_bins = 1500
 no_of_class = 6
@@ -55,6 +57,7 @@ def build_classification_model(hp):
         )
     )
     CNN_Classifier.add(Activation("relu"))
+    CNN_Classifier.add(BatchNormalization())
     CNN_Classifier.add(MaxPooling1D(pool_size=2))
     CNN_Classifier.add(Flatten())
 
@@ -65,8 +68,9 @@ def build_classification_model(hp):
             activation="relu",
         )
     )
+    CNN_Classifier.add(BatchNormalization())
     CNN_Classifier.add(
-        Dropout(rate=hp.Float("dense_dropout", min_value=0.2, max_value=0.5, step=0.1))
+        Dropout(rate=hp.Float("dense_dropout", min_value=0, max_value=0.5, step=0.1))
     )
 
     # THIRD LAYER
@@ -76,10 +80,10 @@ def build_classification_model(hp):
             activation="relu",
         )
     )
+
+    CNN_Classifier.add(BatchNormalization())
     CNN_Classifier.add(
-        Dropout(
-            rate=hp.Float("dense_dropout_2", min_value=0.2, max_value=0.5, step=0.1)
-        )
+        Dropout(rate=hp.Float("dense_dropout_2", min_value=0, max_value=0.5, step=0.1))
     )
 
     # OUTPUT LAYER
@@ -107,6 +111,7 @@ def build_regression_model(hp):
         )
     )
     CNN_Concentration.add(Activation("relu"))
+    CNN_Concentration.add(BatchNormalization())
     CNN_Concentration.add(MaxPooling1D(pool_size=2))
     CNN_Concentration.add(Flatten())
 
@@ -117,8 +122,9 @@ def build_regression_model(hp):
             activation="relu",
         )
     )
+    CNN_Concentration.add(BatchNormalization())
     CNN_Concentration.add(
-        Dropout(rate=hp.Float("dense_dropout", min_value=0.2, max_value=0.5, step=0.1))
+        Dropout(rate=hp.Float("dense_dropout", min_value=0, max_value=0.5, step=0.1))
     )
 
     # THIRD LAYER
@@ -128,18 +134,17 @@ def build_regression_model(hp):
             activation="relu",
         )
     )
+    CNN_Concentration.add(BatchNormalization())
     CNN_Concentration.add(
-        Dropout(
-            rate=hp.Float("dense_dropout_2", min_value=0.2, max_value=0.5, step=0.1)
-        )
+        Dropout(rate=hp.Float("dense_dropout_2", min_value=0, max_value=0.5, step=0.1))
     )
 
     # OUTPUT LAYER
-    CNN_Concentration.add(Dense(no_of_class, activation="linear"))
+    CNN_Concentration.add(Dense(no_of_class, activation="softmax"))  # Changed
 
     CNN_Concentration.compile(
         optimizer=tf.keras.optimizers.legacy.Adam(learning_rate=1e-5, decay=1e-6),
-        loss=conc_loss,
+        loss=tf.keras.losses.MeanSquaredError(),  # changed
         metrics=["mae", "mse"],
     )
 
